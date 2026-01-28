@@ -450,7 +450,7 @@ const Teacher = () => {
                                     {activePoll.options.map((opt: string, idx: number) => {
                                         const votes = activePoll.votes ? (activePoll.votes[idx.toString()] || activePoll.votes[idx] || 0) : 0;
                                         const total = activePoll.votes ? Object.values(activePoll.votes).reduce((a: any, b: any) => a + b, 0) : 0;
-                                        const percent = total > 0 ? Math.round(((votes as number) / (total as number)) * 100) : 0;
+                                        const percent = (total as number) > 0 ? Math.round(((votes as number) / (total as number)) * 100) : 0;
                                         return (
                                             <div key={idx} className="relative w-full border border-gray-100 rounded-lg bg-white overflow-hidden p-1">
                                                 <div className="absolute top-0 bottom-0 left-0 bg-[#5D5FEF] transition-all duration-1000 ease-out z-0 rounded-md" style={{ width: `${percent}%` }} />
