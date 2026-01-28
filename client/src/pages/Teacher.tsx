@@ -113,7 +113,7 @@ const Teacher = () => {
 
     const fetchHistory = async () => {
         try {
-            const res = await axios.get('http://localhost:3000/history');
+            const res = await axios.get('https://pollingsystem-1-f5te.onrender.com/history');
             setPollHistory(res.data);
         } catch (e) {
             console.error("Failed to fetch history", e);
