@@ -1,0 +1,12 @@
+{
+    "name": "polling-system-root",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "install": "cd client && npm install",
+        "build": "cd client && npm run build && cp -r dist ../dist"
+    },
+    "engines": {
+        "node": ">=18"
+    }
+}
