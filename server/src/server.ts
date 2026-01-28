@@ -13,7 +13,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: "*", // Allow all for intern/dev simplicity
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
@@ -21,7 +21,6 @@ const io = new Server(httpServer, {
 app.use(cors());
 app.use(express.json());
 
-// Basic route to check if server is running
 app.get('/', (req, res) => {
     res.send('Polling Server is Running');
 });

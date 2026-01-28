@@ -33,7 +33,6 @@ export const handleSocketConnection = (io: Server, socket: Socket) => {
     socket.on('add_to_queue', async (data: { question: string, options: string[], duration: number }) => {
         console.log("Adding to queue", data);
         await createPoll(data.question, data.options, data.duration, 'queued');
-        // Broadcast queue update to TEACHERS only? Or just everyone for simplicity for now
         const queue = await getQueue();
         io.emit('queue_update', queue);
     });
@@ -59,7 +58,6 @@ export const handleSocketConnection = (io: Server, socket: Socket) => {
     socket.on('vote', async (data: { pollId: string, studentName: string, optionIndex: number }) => {
         try {
             await addVote(data.pollId, data.studentName, data.optionIndex);
-            // Broadcast updated results (in real-time, or optimized to interval? Requirement says "Real-time updates")
             const results = await getPollResults(data.pollId);
             io.emit('poll_results_update', results);
         } catch (err: any) {
@@ -77,12 +75,10 @@ export const handleSocketConnection = (io: Server, socket: Socket) => {
     });
 
     socket.on('kick_student', (studentName: string) => {
-        // Find and remove from connected list
         for (const [id, name] of connectedStudents.entries()) {
             if (name === studentName) {
                 connectedStudents.delete(id);
-                // Optionally disconnect socket? 
-                // io.sockets.sockets.get(id)?.disconnect(true);
+
             }
         }
 
@@ -106,7 +102,6 @@ export const handleSocketConnection = (io: Server, socket: Socket) => {
     });
 };
 
-// Initialize DB and load state
 loadActivePoll().then(() => {
     console.log("State loaded from DB");
 });

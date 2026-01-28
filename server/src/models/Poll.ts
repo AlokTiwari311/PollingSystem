@@ -5,7 +5,7 @@ const PollSchema = new mongoose.Schema({
     options: [String],
     timerDuration: Number,
     startTime: Number,
-    isActive: Boolean, // Deprecate in favor of status eventually, or keep synced
+    isActive: Boolean,
     status: {
         type: String,
         enum: ['queued', 'active', 'completed'],
@@ -25,7 +25,6 @@ const VoteSchema = new mongoose.Schema({
     studentName: String,
     optionIndex: Number
 });
-// Compound index to prevent double voting
 VoteSchema.index({ pollId: 1, studentName: 1 }, { unique: true });
 
 export const VoteModel = mongoose.model('Vote', VoteSchema);

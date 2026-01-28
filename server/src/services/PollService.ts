@@ -1,13 +1,12 @@
 import { PollModel, VoteModel } from '../models/Poll';
 
-let activePoll: any = null; // In-memory cache for active poll
+let activePoll: any = null;
 
-// Load active poll from DB on server restart (Resilience)
 export const loadActivePoll = async () => {
     try {
         const poll = await PollModel.findOne({ isActive: true });
         if (poll) {
-            // Check if it's expired based on duration
+            // Check expired based on duration
             const now = Date.now();
             const elapsed = Math.floor((now - poll.startTime) / 1000);
 
@@ -19,7 +18,6 @@ export const loadActivePoll = async () => {
                 return;
             }
 
-            // Re-construct aggregate votes
             const votesList = await VoteModel.find({ pollId: poll._id });
             const votesMap: { [key: number]: number } = {};
             votesList.forEach((v: any) => {
@@ -43,7 +41,7 @@ export const loadActivePoll = async () => {
 };
 
 export const createPoll = async (question: string, options: string[], duration: number, status: 'active' | 'queued' = 'active') => {
-    // If activating immediately, stop others
+
     if (status === 'active' && activePoll) {
         console.log("Stopping previous active poll to start new one.");
         activePoll.isActive = false;
@@ -56,14 +54,13 @@ export const createPoll = async (question: string, options: string[], duration: 
         options,
         timerDuration: duration,
         startTime,
-        isActive: status === 'active', // sync legacy field
+        isActive: status === 'active',
         status,
         votes: {}
     });
 
     await newPoll.save();
 
-    // Only set as active in-memory if it's actually active
     if (status === 'active') {
         activePoll = {
             id: newPoll._id.toString(),
@@ -82,11 +79,10 @@ export const createPoll = async (question: string, options: string[], duration: 
 };
 
 export const getQueue = async () => {
-    return await PollModel.find({ status: 'queued' }).sort({ _id: 1 }); // FIFO
+    return await PollModel.find({ status: 'queued' }).sort({ _id: 1 });
 };
 
 
-// Stop the active poll (Zombie Poll Fix)
 export const stopPoll = async () => {
     if (activePoll) {
         console.log(`Stopping poll ${activePoll.id}`);
@@ -148,8 +144,6 @@ export const addVote = async (pollId: string, studentName: string, optionIndex: 
         // Update in-memory
         activePoll.votes[optionIndex] = (activePoll.votes[optionIndex] || 0) + 1;
 
-        // Update Poll Document votes map as well for redundancy/history? Optional but good.
-        // await PollModel.updateOne({ _id: pollId }, { $inc: { [`votes.${optionIndex}`]: 1 } });
 
         return true;
     } catch (err: any) {
@@ -160,14 +154,11 @@ export const addVote = async (pollId: string, studentName: string, optionIndex: 
     }
 };
 
-// Result aggregation
 export const getPollResults = async (pollId: string) => {
-    // return activePoll votes if match
     if (activePoll && activePoll.id === pollId.toString()) {
         return activePoll.votes;
     }
 
-    // If not active, fetch from History
     const votesList = await VoteModel.find({ pollId });
     const votesMap: { [key: number]: number } = {};
     votesList.forEach((v: any) => {

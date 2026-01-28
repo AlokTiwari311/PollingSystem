@@ -235,13 +235,13 @@ const Teacher = () => {
                     </div>
                 </div>
                 {/* Left Main Content */}
-                <div className="flex-1 ">
+                <div className="flex-1">
                     {/* Header Badge */}
 
 
                     {viewMode === 'history' && (
                         // HISTORY VIEW
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                        <div className="bg-white max-w-4xl mx-auto rounded-xl shadow-sm p-6">
                             <h2 className="text-2xl font-bold mb-6">Poll History</h2>
                             <div className="space-y-4">
                                 {pollHistory.map((p, i) => (
@@ -249,7 +249,7 @@ const Teacher = () => {
                                         <h3 className="text-xl font-bold text-black mb-4">Question {i + 1}</h3>
 
                                         {/* Question Header Card */}
-                                        <div className="bg-[#565656] text-white p-6 rounded-t-lg shadow-sm">
+                                        <div className="bg-[#565656] text-white p-4 rounded-t-lg shadow-sm">
                                             <h3 className="text-lg font-medium">{p.question}</h3>
                                         </div>
 
@@ -281,9 +281,7 @@ const Teacher = () => {
                                                     </div>
                                                 );
                                             })}
-                                            <div className="mt-2 text-right text-xs text-gray-400">
-                                                {new Date(p.startTime).toLocaleString()}
-                                            </div>
+
                                         </div>
                                     </div>
                                 ))}
