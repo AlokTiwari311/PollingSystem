@@ -6,7 +6,6 @@
     "scripts": {
         "start": "npx ts-node src/server.ts",
         "dev": "nodemon --exec npx ts-node src/server.ts",
-        "build": "react-scripts build"
     },
     "keywords": [],
     "author": "",
