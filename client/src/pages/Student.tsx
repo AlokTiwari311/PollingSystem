@@ -1,25 +1,28 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { usePollTimer } from '../hooks/usePollTimer';
-import { IoSparklesSharp, IoChatbubbleEllipsesSharp, IoSend, IoClose, IoTime, IoPeople } from "react-icons/io5";
+import { IoSparklesSharp } from "react-icons/io5";
+import { WaitingScreen } from '../components/student/WaitingScreen';
+import { ActivePollView } from '../components/student/ActivePollView';
+import { StudentChatPanel } from '../components/student/StudentChatPanel';
 
 const Student = () => {
     const socket = useSocket();
+    // Basic User Info
     const [name, setName] = useState('');
     const [isJoined, setIsJoined] = useState(false);
     const [isKicked, setIsKicked] = useState(false);
+
+    // Poll State
     const [activePoll, setActivePoll] = useState<any>(null);
     const [hasVoted, setHasVoted] = useState(false);
     const [selectedOption, setSelectedOption] = useState<number | null>(null);
 
-    // Chat & Participants State
-    const [showChat, setShowChat] = useState(false);
-    const [chatTab, setChatTab] = useState<'chat' | 'participants'>('chat');
+    // Chat & Participants ka state
     const [participants, setParticipants] = useState<string[]>([]);
     const [chatMessages, setChatMessages] = useState<{ sender: string, text: string }[]>([]);
-    const [chatInput, setChatInput] = useState('');
-    const chatEndRef = useRef<HTMLDivElement>(null);
 
+    // Pehle se login hai to check karo (session storage se)
     useEffect(() => {
         const savedName = sessionStorage.getItem('studentName');
         if (savedName) {
@@ -28,33 +31,75 @@ const Student = () => {
         }
     }, []);
 
+    // Socket events handle karne ka main logic
     useEffect(() => {
         if (!socket) return;
 
-        socket.on('poll_update', (poll) => { setActivePoll(poll); setHasVoted(false); setSelectedOption(null); });
+        // Poll update aane pe state set karo. Naya poll hai to vote reset karo.
+        socket.on('poll_update', (poll) => {
+            setActivePoll((prev: any) => {
+                // Agar poll ID change hua hai, tabi vote status reset karo
+                if (poll && prev && poll.id !== prev.id) {
+                    setHasVoted(false);
+                    setSelectedOption(null);
+                }
+
+                // 1. Session Storage Check (Client Side Failsafe)
+                if (poll) {
+                    const localVote = sessionStorage.getItem(`voted_poll_${poll.id}`);
+                    if (localVote) {
+                        setHasVoted(true);
+                        // Option index bhi save kar sakte hain agar chahiye, par abhi true bas hai button chupane ke liye
+                        const savedOption = sessionStorage.getItem(`voted_option_${poll.id}`);
+                        if (savedOption) setSelectedOption(parseInt(savedOption));
+                    }
+                }
+
+                // Explicit check maaro agar poll aa gaya hai
+                if (poll) {
+                    const currentName = sessionStorage.getItem('studentName');
+                    if (currentName) {
+                        socket.emit('check_my_vote', { pollId: poll.id, studentName: currentName });
+                    }
+                }
+
+                return poll;
+            });
+        });
+
         socket.on('poll_created', (poll) => { setActivePoll(poll); setHasVoted(false); setSelectedOption(null); });
+
+        // Result update ho raha hai to bas votes update karo, baaki mat chhedna
         socket.on('poll_results_update', (results) => setActivePoll((prev: any) => prev ? { ...prev, votes: results } : prev));
+
+        // Refresh Fix: Server batayega agar humne already vote diya hai
+        socket.on('student_vote_status', (status: { hasVoted: boolean, optionIndex: number }) => {
+            console.log("Received student_vote_status:", status);
+            if (status.hasVoted) {
+                setHasVoted(true);
+                setSelectedOption(status.optionIndex);
+            }
+        });
 
         socket.on('participants_update', (list: string[]) => {
             setParticipants(list);
         });
 
-        // Chat & Kick
+        // Chat & Kick Logic
         socket.on('chat_message', (msg) => {
             setChatMessages(prev => [...prev, msg]);
-            // Auto-scroll
-            setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         });
 
         socket.on('kick_student', (kickedName) => {
+            // Agar mera naam hai kicked list me, to tata bye bye.
             if (kickedName === name || kickedName === sessionStorage.getItem('studentName')) {
                 setIsKicked(true);
                 sessionStorage.removeItem('studentName');
-                // Don't reset name/isJoined yet so we show the kicked screen instead of login
+                // Abhi naam reset nahi kar rahe, taaki kicked screen dikha sakein
             }
         });
 
-        // Re-join logic for resilience
+        // Agar refresh kiya to wapas join karwao server pe
         const savedName = sessionStorage.getItem('studentName');
         if (savedName) {
             socket.emit('join_session', savedName);
@@ -64,38 +109,41 @@ const Student = () => {
             socket.off('poll_update');
             socket.off('poll_created');
             socket.off('poll_results_update');
+            socket.off('student_vote_status');
             socket.off('chat_message');
             socket.off('kick_student');
             socket.off('participants_update');
         };
     }, [socket, name]);
 
+    // Timer hook use kar rahe hain taaki automatically seconds kam hote dikhein
     const timeLeft = usePollTimer(activePoll?.startTime, activePoll?.timerDuration || 0);
 
+    // Join button click karne pe
     const handleJoin = (e: React.FormEvent) => {
         e.preventDefault();
         if (name.trim()) {
-            // Uniqueness check could be here or backend, strictly per session requirement is satisfied by sessionStorage
+            // Session me save kar lo taaki refresh pe na ude
             sessionStorage.setItem('studentName', name);
             if (socket) socket.emit('join_session', name);
             setIsJoined(true);
         }
     };
 
+    // Vote submit karne ka function
     const handleVote = () => {
         if (!socket || !activePoll || selectedOption === null) return;
         socket.emit('vote', { pollId: activePoll.id, studentName: name, optionIndex: selectedOption });
+
+        // Optimistic update
         setHasVoted(true);
+
+        // Save to session storage (Browser persistence)
+        sessionStorage.setItem(`voted_poll_${activePoll.id}`, 'true');
+        sessionStorage.setItem(`voted_option_${activePoll.id}`, selectedOption.toString());
     };
 
-    const sendChat = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (chatInput.trim() && socket) {
-            socket.emit('chat_message', { sender: name, text: chatInput });
-            setChatInput('');
-        }
-    }
-
+    // Agar kick ho gaya hai to sad screen dikhao
     if (isKicked) {
         return (
             <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 font-sans text-center">
@@ -112,6 +160,7 @@ const Student = () => {
         );
     }
 
+    // Agar join nahi kiya to login form dikhao
     if (!isJoined) {
         return (
             <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 font-sans">
@@ -148,182 +197,31 @@ const Student = () => {
         );
     }
 
-    const showResults = hasVoted || (activePoll && timeLeft === 0);
-
+    // Main student view: Ya to waiting ya active poll
     return (
         <div className="min-h-screen bg-white font-sans relative">
             {/* Main Content Area */}
             {!activePoll ? (
-                // WAITING STATE
-                <div className="flex flex-col items-center justify-center min-h-screen p-6">
-                    <div className="mb-12 animate-pulse">
-                        <span className="inline-flex items-center px-4 py-1.5 bg-primary text-white rounded-full text-xs font-bold shadow-md">
-                            <IoSparklesSharp className="mr-2 text-yellow-300" /> Intervue Poll
-                        </span>
-                    </div>
-                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-8"></div>
-                    <h2 className="text-xl font-bold text-black">Wait for the teacher to ask questions..</h2>
-                </div>
+                <WaitingScreen />
             ) : (
-                // ACTIVE POLL STATE
-                <div className="p-6 md:p-12 flex justify-center min-h-screen">
-                    <div className="w-full max-w-3xl">
-                        <div className="flex items-center mb-6 w-full space-x-8">
-                            <h2 className="text-2xl font-bold text-black">Question 1</h2>
-                            {timeLeft >= 0 && (
-                                <span className="text-red-500 font-bold text-lg flex items-center">
-                                    <IoTime className="mr-2 text-2xl" />
-                                    00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}
-                                </span>
-                            )}
-                        </div>
-
-                        <div className="bg-[#565656] text-white p-6 rounded-t-lg shadow-sm">
-                            <h3 className="text-lg font-medium">{activePoll.question}</h3>
-                        </div>
-
-                        <div className="bg-white border border-gray-200 border-t-0 p-6 rounded-b-lg shadow-sm space-y-4">
-                            {!showResults ? (
-                                <>
-                                    {activePoll.options.map((opt: string, idx: number) => (
-                                        <button
-                                            key={idx}
-                                            onClick={() => setSelectedOption(idx)}
-                                            className={`w-full text-left p-4 rounded-lg flex items-center border transition-all ${selectedOption === idx
-                                                ? 'border-primary bg-white ring-1 ring-primary'
-                                                : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
-                                                }`}
-                                        >
-                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold mr-4 ${selectedOption === idx ? 'bg-primary text-white' : 'bg-gray-400 text-white'
-                                                }`}>
-                                                {idx + 1}
-                                            </div>
-                                            <span className="text-black font-medium">{opt}</span>
-                                        </button>
-                                    ))}
-                                    <div className="flex justify-end pt-4">
-                                        <button
-                                            onClick={handleVote}
-                                            disabled={selectedOption === null}
-                                            className="bg-primary hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 px-12 rounded-full shadow-lg transition-all"
-                                        >
-                                            Submit
-                                        </button>
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    {activePoll.options.map((opt: string, idx: number) => {
-                                        const votes = activePoll.votes ? (activePoll.votes[idx.toString()] || activePoll.votes[idx] || 0) : 0;
-                                        const total = activePoll.votes ? Object.values(activePoll.votes).reduce((a: any, b: any) => a + b, 0) : 0;
-                                        const percent = ((total as number) > 0) ? Math.round(((votes as number) / (total as number)) * 100) : 0;
-                                        return (
-                                            <div key={idx} className="relative w-full border border-gray-100 rounded-lg bg-white overflow-hidden p-1">
-                                                <div className="absolute top-0 bottom-0 left-0 bg-primary/80 transition-all duration-1000 ease-out z-0" style={{ width: `${percent}%` }} />
-                                                <div className="relative z-10 flex items-center justify-between p-3">
-                                                    <div className="flex items-center">
-                                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold mr-4 bg-white text-primary shadow-sm`}>
-                                                            {idx + 1}
-                                                        </div>
-                                                        <span className={`font-medium ${percent > 50 ? 'text-white' : 'text-black'}`}>{opt}</span>
-                                                    </div>
-                                                    <span className={`font-bold ${percent > 50 ? 'text-white' : 'text-black'}`}>{percent}%</span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </>
-                            )}
-                        </div>
-                        <div className="text-center mt-12">
-                            <h3 className="text-lg font-bold text-black">Wait for the teacher to ask a new question..</h3>
-                        </div>
-                    </div>
-                </div>
+                <ActivePollView
+                    activePoll={activePoll}
+                    timeLeft={timeLeft}
+                    selectedOption={selectedOption}
+                    setSelectedOption={setSelectedOption}
+                    handleVote={handleVote}
+                    hasVoted={hasVoted}
+                />
             )}
 
             {/* Chat Floating Button */}
             {activePoll && (
-                <div className="fixed bottom-8 right-8 z-50">
-                    <button
-                        onClick={() => setShowChat(!showChat)}
-                        className="w-14 h-14 bg-primary text-white rounded-full flex items-center justify-center shadow-lg hover:bg-primary-dark transition-colors"
-                    >
-                        {showChat ? <IoClose size={24} /> : <IoChatbubbleEllipsesSharp size={24} />}
-                    </button>
-                </div>
-            )}
-
-            {/* Chat Window */}
-            {activePoll && showChat && (
-                <div className="fixed bottom-24 right-8 w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col z-50 overflow-hidden animate-fade-in-up h-96">
-                    <div className="bg-primary text-white font-bold flex">
-                        <button
-                            onClick={() => setChatTab('chat')}
-                            className={`flex-1 p-3 text-center ${chatTab === 'chat' ? 'bg-primary-dark' : 'hover:bg-white/10'}`}
-                        >
-                            Chat
-                        </button>
-                        <button
-                            onClick={() => setChatTab('participants')}
-                            className={`flex-1 p-3 text-center ${chatTab === 'participants' ? 'bg-primary-dark' : 'hover:bg-white/10'}`}
-                        >
-                            Participants ({participants.length})
-                        </button>
-                    </div>
-
-                    {chatTab === 'chat' && (
-                        <>
-                            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
-                                {chatMessages.map((msg, i) => {
-                                    const isSelf = msg.sender === name;
-                                    return (
-                                        <div key={i} className={`flex flex-col ${isSelf ? 'items-end' : 'items-start'}`}>
-                                            <span className={`text-xs font-bold mb-1 text-primary`}>
-                                                {msg.sender}
-                                            </span>
-                                            <div className={`max-w-[85%] px-4 py-3 rounded-xl text-sm shadow-sm ${isSelf
-                                                ? 'bg-primary text-white rounded-br-none'
-                                                : 'bg-[#333333] text-white rounded-bl-none'
-                                                }`}>
-                                                {msg.text}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                                <div ref={chatEndRef} />
-                            </div>
-                            <form onSubmit={sendChat} className="p-3 border-t border-gray-100 bg-white flex items-center">
-                                <input
-                                    type="text"
-                                    value={chatInput}
-                                    onChange={(e) => setChatInput(e.target.value)}
-                                    className="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-primary text-black"
-                                    placeholder="Type a message..."
-                                />
-                                <button type="submit" className="ml-2 w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white hover:bg-primary-dark">
-                                    <IoSend size={14} />
-                                </button>
-                            </form>
-                        </>
-                    )}
-
-                    {chatTab === 'participants' && (
-                        <div className="flex-1 overflow-y-auto p-2 bg-gray-50">
-                            {participants.length === 0 && <p className="text-center text-gray-400 mt-4">No participants.</p>}
-                            {participants.map((p, i) => (
-                                <div key={i} className="flex justify-between items-center p-3 bg-white rounded-lg shadow-sm mb-2 border border-gray-100">
-                                    <div className="flex items-center">
-                                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 mr-3">
-                                            <IoPeople />
-                                        </div>
-                                        <span className="font-medium text-sm text-black">{p}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                <StudentChatPanel
+                    socket={socket}
+                    name={name}
+                    participants={participants}
+                    chatMessages={chatMessages}
+                />
             )}
         </div>
     );

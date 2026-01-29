@@ -2,121 +2,74 @@ import { PollModel, VoteModel } from '../models/Poll';
 
 let activePoll: any = null;
 
-export const loadActivePoll = async () => {
-    try {
-        const poll = await PollModel.findOne({ isActive: true });
-        if (poll) {
-            // Check expired based on duration
-            const now = Date.now();
-            const elapsed = Math.floor((now - poll.startTime) / 1000);
-
-            if (elapsed > poll.timerDuration) {
-                console.log("Found stale active poll on startup. Marking as inactive.");
-                poll.isActive = false;
-                await poll.save();
-                activePoll = null;
-                return;
-            }
-
-            const votesList = await VoteModel.find({ pollId: poll._id });
-            const votesMap: { [key: number]: number } = {};
-            votesList.forEach((v: any) => {
-                votesMap[v.optionIndex] = (votesMap[v.optionIndex] || 0) + 1;
-            });
-
-            activePoll = {
-                id: poll._id.toString(),
-                question: poll.question,
-                options: poll.options,
-                timerDuration: poll.timerDuration,
-                startTime: poll.startTime,
-                isActive: poll.isActive,
-                votes: votesMap
-            };
-            console.log("Active poll loaded from MongoDB");
-        }
-    } catch (e) {
-        console.error("Failed to load active poll", e);
-    }
-};
-
-export const createPoll = async (question: string, options: string[], duration: number, status: 'active' | 'queued' = 'active') => {
-
-    if (status === 'active' && activePoll) {
-        console.log("Stopping previous active poll to start new one.");
-        activePoll.isActive = false;
-        await PollModel.updateOne({ _id: activePoll.id }, { isActive: false, status: 'completed' });
-    }
-
-    const startTime = Date.now();
-    const newPoll = new PollModel({
-        question,
-        options,
-        timerDuration: duration,
-        startTime,
-        isActive: status === 'active',
-        status,
-        votes: {}
-    });
-
-    await newPoll.save();
-
-    if (status === 'active') {
-        activePoll = {
-            id: newPoll._id.toString(),
-            question,
-            options,
-            timerDuration: duration,
-            startTime,
-            isActive: true,
-            status: 'active',
-            votes: {}
-        };
-        return activePoll;
-    }
-
-    return newPoll;
-};
-
-export const getQueue = async () => {
-    return await PollModel.find({ status: 'queued' }).sort({ _id: 1 });
-};
-
-
-export const stopPoll = async () => {
-    if (activePoll) {
-        console.log(`Stopping poll ${activePoll.id}`);
-        // Update DB
-        await PollModel.updateOne({ _id: activePoll.id }, { isActive: false, status: 'completed' });
-        // Update Memory
-        activePoll.isActive = false;
-        activePoll = null;
-    }
-};
-
-export const activatePoll = async (pollId: string) => {
-    // Stop current
-    await stopPoll();
-
-    const poll = await PollModel.findById(pollId);
-    if (!poll) throw "Poll not found";
-
-    poll.status = 'active';
-    poll.isActive = true;
-    poll.startTime = Date.now();
-    await poll.save();
-
+const updateActivePollInMemory = (poll: any, votes: any = {}) => {
     activePoll = {
         id: poll._id.toString(),
         question: poll.question,
         options: poll.options,
         timerDuration: poll.timerDuration,
         startTime: poll.startTime,
+        isActive: poll.isActive,
+        status: poll.status,
+        votes: votes
+    };
+    return activePoll;
+};
+
+export const loadActivePoll = async () => {
+    try {
+        const poll = await PollModel.findOne({ isActive: true });
+        if (!poll) return;
+
+        const now = Date.now();
+        const elapsedSeconds = Math.floor((now - poll.startTime) / 1000);
+
+        if (elapsedSeconds > poll.timerDuration) {
+            poll.isActive = false;
+            await poll.save();
+            activePoll = null;
+            return;
+        }
+
+        const votesList = await VoteModel.find({ pollId: poll._id });
+        const votesMap: { [key: number]: number } = {};
+
+        votesList.forEach((v: any) => {
+            const result = votesMap[v.optionIndex] || 0;
+            votesMap[v.optionIndex] = result + 1;
+        });
+
+        updateActivePollInMemory(poll, votesMap);
+
+    } catch (e) {
+        console.error("Poll load error", e);
+    }
+};
+
+export const createPoll = async (question: string, options: string[], duration: number) => {
+    if (activePoll) {
+        await stopPoll();
+    }
+
+    const newPoll = new PollModel({
+        question,
+        options,
+        timerDuration: duration,
+        startTime: Date.now(),
         isActive: true,
         status: 'active',
         votes: {}
-    };
-    return activePoll;
+    });
+
+    await newPoll.save();
+    return updateActivePollInMemory(newPoll);
+};
+
+export const stopPoll = async () => {
+    if (activePoll) {
+        await PollModel.updateOne({ _id: activePoll.id }, { isActive: false, status: 'completed' });
+        activePoll = null;
+    }
 };
 
 export const getActivePoll = () => {
@@ -125,13 +78,12 @@ export const getActivePoll = () => {
 
 export const addVote = async (pollId: string, studentName: string, optionIndex: number) => {
     if (!activePoll || activePoll.id !== pollId) {
-        throw "No active poll or poll mismatch";
+        throw "No active poll or invalid ID.";
     }
 
-    // Check time
-    const elapsed = Math.floor((Date.now() - (activePoll.startTime || 0)) / 1000);
+    const elapsed = Math.floor((Date.now() - activePoll.startTime) / 1000);
     if (elapsed > activePoll.timerDuration) {
-        throw "Time is up";
+        throw "Time over!";
     }
 
     try {
@@ -141,14 +93,13 @@ export const addVote = async (pollId: string, studentName: string, optionIndex: 
             optionIndex
         });
 
-        // Update in-memory
-        activePoll.votes[optionIndex] = (activePoll.votes[optionIndex] || 0) + 1;
-
+        const currentVotes = activePoll.votes[optionIndex] || 0;
+        activePoll.votes[optionIndex] = currentVotes + 1;
 
         return true;
     } catch (err: any) {
-        if (err.code === 11000) { // Duplicate key error
-            throw "Already voted";
+        if (err.code === 11000) {
+            throw "You can only vote once!";
         }
         throw err;
     }
@@ -167,22 +118,29 @@ export const getPollResults = async (pollId: string) => {
     return votesMap;
 };
 
+import * as fs from 'fs';
 
+export const checkStudentVote = async (pollId: string, studentName: string) => {
+    try { fs.appendFileSync('debug_log.txt', `[${new Date().toISOString()}] Checking vote for: Poll=${pollId}, Student=${studentName}\n`); } catch (e) { }
+
+    const vote = await VoteModel.findOne({ pollId, studentName });
+
+    try { fs.appendFileSync('debug_log.txt', `[${new Date().toISOString()}] Vote Found: ${JSON.stringify(vote)}\n`); } catch (e) { }
+
+    if (vote) {
+        return { hasVoted: true, optionIndex: vote.optionIndex };
+    }
+    return { hasVoted: false, optionIndex: null };
+};
 
 export const getAllPolls = async () => {
-    const polls = await PollModel.find({ status: { $ne: 'queued' } }).sort({ startTime: -1 });
+    const polls = await PollModel.find().sort({ startTime: -1 });
 
-    // Enrich with votes
     const historyData = await Promise.all(polls.map(async (p) => {
-        const votesList = await VoteModel.find({ pollId: p._id.toString() });
-        const votesMap: { [key: number]: number } = {};
-        votesList.forEach((v: any) => {
-            votesMap[v.optionIndex] = (votesMap[v.optionIndex] || 0) + 1;
-        });
-
+        const votes = await getPollResults(p._id.toString());
         return {
             ...p.toObject(),
-            votes: votesMap
+            votes
         };
     }));
 
